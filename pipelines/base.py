@@ -1,18 +1,15 @@
 
 
 def BaseBenchmarkPipeline():
-    def __init__(self, learner, delimiter, task):
+    def __init__(self, delimiter, task):
         """Initializes the pipeline.
 
         Args:
-            learner (_type_): A Scikit-learn estimator that is going to be used
-                to fit the pipeline. This can be optionally used.
             delimiter (str): A string that specifies the delimiter used in
                 the input data.
             task (str): A string that specifies the task. This can be either
                 'classification' or 'regression'.
         """
-        self.learner = learner
         self.delimiter = delimiter
         self.task = task
 

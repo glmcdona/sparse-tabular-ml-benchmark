@@ -2,12 +2,10 @@ from base import BaseBenchmarkPipeline
 from bloombag import BloomVectorizer
 
 class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
-    def __init__(self, learner=None, delimiter=',', task='classification', n_bags=5, error_rate=0.01, n_features=100000):
+    def __init__(self, delimiter=',', task='classification', n_bags=5, error_rate=0.01, n_features=100000):
         """Initializes the pipeline.
 
         Args:
-            learner (_type_): A Scikit-learn estimator that is going to be used
-                to fit the pipeline. This can be optionally used.
             delimiter (str): A string that specifies the delimiter used in
                 the input data.
             task (str): A string that specifies the task. This can be either
@@ -17,7 +15,7 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
             n_features (int): Number of features to use sorted by occurence
                 count in the training data.
         """
-        super(BenchmarkBloomVectorizer, self).__init__(learner, delimiter, task)
+        super(BenchmarkBloomVectorizer, self).__init__(delimiter, task)
         self.featurizer = None
         self.size = None
         self.n_bags = n_bags
