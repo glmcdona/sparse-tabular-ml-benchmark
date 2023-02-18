@@ -1,6 +1,6 @@
 
 
-def BaseBenchmarkPipeline():
+class BaseBenchmarkPipeline():
     def __init__(self, delimiter, task):
         """Initializes the pipeline.
 

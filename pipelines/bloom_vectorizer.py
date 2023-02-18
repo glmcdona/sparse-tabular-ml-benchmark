@@ -1,8 +1,8 @@
-from base import BaseBenchmarkPipeline
+from .base import BaseBenchmarkPipeline
 from bloombag import BloomVectorizer
 
 class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
-    def __init__(self, delimiter=',', task='classification', n_bags=5, error_rate=0.01, n_features=100000):
+    def __init__(self, delimiter='|', task='classification', n_bags=5, error_rate=0.01, n_features=100000):
         """Initializes the pipeline.
 
         Args:
@@ -21,7 +21,7 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
         self.n_bags = n_bags
         self.error_rate = error_rate
         self.n_features = n_features
-        
+    
 
     def fit(self, X, y):
         """Fits the pipeline to the training data.
@@ -72,6 +72,7 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
             raise ValueError('Pipeline is not fitted yet.')
         return self.size
     
+
     def get_num_features(self):
         """Returns the number of features used by the featurizer.
 
@@ -80,5 +81,6 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
         """
         if self.featurizer is None:
             raise ValueError('Pipeline is not fitted yet.')
+        return 0
         return self.featurizer.get_num_features()
         
