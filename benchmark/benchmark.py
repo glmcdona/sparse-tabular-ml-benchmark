@@ -1,7 +1,9 @@
 import time
-from .loaders import loader_newsgroup_binary
+from .loaders import loader_newsgroup_binary, loader_click_prediction
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+import numpy as np
+from functools import partial
 
 class BinaryClassificationBenchmark():
     def __init__(self, datasets=None):
@@ -12,66 +14,67 @@ class BinaryClassificationBenchmark():
                 datasets will be used.
         """
         if datasets is None:
-            datasets = {
-                "newsgroups": loader_newsgroup_binary
-            }
+            datasets = [
+                ("newsgroups", loader_newsgroup_binary),
+                ("loader_click_prediction", loader_click_prediction),
+            ]
             
         self.datasets = datasets
 
-    def get_next_benchmark(self):
+    def get_next_benchmark(self, seed=42):
         """Generator returns the next benchmark to run.
         
         Returns:
             tuple: A tuple containing the name of the benchmark, dataframe
                 containing "features" and "target" columns.
         """
-        for name, loader in self.datasets.items():
-            yield name, loader()
+        for name, loader in self.datasets:
+            yield name, loader(seed=seed)
 
-    def run_pipeline(self, featurizer, learner, df, sample_rate=1.0, n_trials=10):
+    def run_pipeline(self, featurizer, learner, loader, seed=42, sample_rate=1.0, n_trials=10):
         """Runs the pipeline on the given dataset.
         
         Args:
             featurizer (Featurizer): A featurizer transform.
             learner (Learner): A learner to fit and score.
-            df (DataFrame): A dataframe containing the "features" and "target"
-                columns.
+            loader (): A function that returns the dataframe when given a seed.
             n_trials (int): Number of trials to run for each dataset.
             
         Returns:
             dict: A dictionary containing the results of the benchmark.
         """
         results = {
-            "time": {
-                "total": [],
-                "train_total": [],
-                "train_transform_fit": [],
-                "train_transform": [],
-                "train_fit": [],
-                "test_total": [],
-                "test_transform": [],
-                "test_score": [],
-            },
-            "size": {
-                "number_of_features": [],
-                "train_shape_before_transform": [],
-                "train_shape_after_transform": [],
-                "test_shape_before_transform": [],
-                "test_shape_after_transform": [],
-                "size_in_bytes_featurizer": [],
-                "size_in_bytes_learner": [],
-                "size_in_bytes_total": [],
-            },
-            "score": {
-                "roc_auc": [],
-                "f1": [],
-                "accuracy": [],
-                "precision": [],
-                "recall": [],
-            },
+            "roc_auc": [],
+            "f1": [],
+            "accuracy": [],
+            "precision": [],
+            "recall": [],
+
+            "number_of_features": [],
+            "train_shape_before_transform": [],
+            "train_shape_after_transform": [],
+            "test_shape_before_transform": [],
+            "test_shape_after_transform": [],
+            "size_in_bytes_featurizer": [],
+            "size_in_bytes_learner": [],
+            "size_in_bytes_total": [],
+
+            "time_total": [],
+            "time_train_total": [],
+            "time_train_transform_fit": [],
+            "time_train_transform": [],
+            "time_train_fit": [],
+            "time_test_total": [],
+            "time_test_transform": [],
+            "time_test_score": [],
         }
         
+        current_seed = seed
         for i in range(n_trials):
+            # Load the data with a different seed each time
+            df = loader(seed=current_seed)
+            current_seed += 1
+
             X_train, X_test, y_train, y_test = train_test_split(
                 df["features"], df["target"], test_size=0.2)
 
@@ -86,75 +89,75 @@ class BinaryClassificationBenchmark():
                 y_test = y_test[:n_samples]
             
             # Transform fit
-            start = time.time()
+            start = time.perf_counter_ns()
             featurizer.fit(X_train, y_train)
-            results["time"]["train_transform_fit"].append(time.time() - start)
+            results["time_train_transform_fit"].append(time.perf_counter_ns() - start)
 
             # Transform
-            results["size"]["train_shape_before_transform"].append(X_train.shape)
-            start = time.time()
+            results["train_shape_before_transform"].append(X_train.shape)
+            start = time.perf_counter_ns()
             X_train = featurizer.transform(X_train)
-            results["time"]["train_transform"].append(time.time() - start)
-            results["size"]["train_shape_after_transform"].append(X_train.shape)
+            results["time_train_transform"].append(time.perf_counter_ns() - start)
+            results["train_shape_after_transform"].append(X_train.shape)
 
             # Fit learner
-            start = time.time()
+            start = time.perf_counter_ns()
             learner.fit(X_train, y_train)
-            results["time"]["train_fit"].append(time.time() - start)
+            results["time_train_fit"].append(time.perf_counter_ns() - start)
 
             # Score transform
-            results["size"]["test_shape_before_transform"].append(X_test.shape)
-            start = time.time()
+            results["test_shape_before_transform"].append(X_test.shape)
+            start = time.perf_counter_ns()
             X_test = featurizer.transform(X_test)
-            results["time"]["test_transform"].append(time.time() - start)
-            results["size"]["test_shape_after_transform"].append(X_test.shape)
+            results["time_test_transform"].append(time.perf_counter_ns() - start)
+            results["test_shape_after_transform"].append(X_test.shape)
 
-            start = time.time()
+            start = time.perf_counter_ns()
             y_pred = learner.predict(X_test)
-            results["time"]["test_score"].append(time.time() - start)
+            results["time_test_score"].append(time.perf_counter_ns() - start)
 
             # Compute metrics
-            results["score"]["roc_auc"].append(roc_auc_score(y_test, y_pred))
-            results["score"]["f1"].append(f1_score(y_test, y_pred))
-            results["score"]["accuracy"].append(accuracy_score(y_test, y_pred))
-            results["score"]["precision"].append(precision_score(y_test, y_pred))
-            results["score"]["recall"].append(recall_score(y_test, y_pred))
+            results["roc_auc"].append(roc_auc_score(y_test, y_pred))
+            results["f1"].append(f1_score(y_test, y_pred))
+            results["accuracy"].append(accuracy_score(y_test, y_pred))
+            results["precision"].append(precision_score(y_test, y_pred))
+            results["recall"].append(recall_score(y_test, y_pred))
 
             # Compute total times
-            results["time"]["train_total"].append(
-                results["time"]["train_transform_fit"][-1] +
-                results["time"]["train_transform"][-1] +
-                results["time"]["train_fit"][-1])
-            results["time"]["test_total"].append(
-                results["time"]["test_transform"][-1] +
-                results["time"]["test_score"][-1])
-            results["time"]["total"].append(
-                results["time"]["train_total"][-1] +
-                results["time"]["test_total"][-1])
+            results["time_train_total"].append(
+                results["time_train_transform_fit"][-1] +
+                results["time_train_transform"][-1] +
+                results["time_train_fit"][-1])
+            results["time_test_total"].append(
+                results["time_test_transform"][-1] +
+                results["time_test_score"][-1])
+            results["time_total"].append(
+                results["time_train_total"][-1] +
+                results["time_test_total"][-1])
             
             # Compute featurizer size
             featurizer_size = featurizer.get_size_in_bytes()
-            results["size"]["size_in_bytes_featurizer"].append(featurizer_size)
+            results["size_in_bytes_featurizer"].append(featurizer_size)
 
             # Save number of features
-            results["size"]["number_of_features"].append(featurizer.get_num_features())
+            results["number_of_features"].append(featurizer.get_num_features())
 
             # Compute learner size
             learner_size = 0
             if hasattr(learner, "coef_"):
-                learner_size += learner.coef_[0] * 4 + 1
+                learner_size += (len(learner.coef_[0]) + 1) * 4
             else:
                 print("WARNING: Could not compute learner size.")
-            results["size"]["size_in_bytes_learner"].append(learner_size)
+            results["size_in_bytes_learner"].append(learner_size)
 
             # Compute total size
-            results["size"]["size_in_bytes_total"].append(
-                results["size"]["size_in_bytes_featurizer"][-1] +
-                results["size"]["size_in_bytes_learner"][-1])
-            
+            results["size_in_bytes_total"].append(
+                results["size_in_bytes_featurizer"][-1] +
+                results["size_in_bytes_learner"][-1])
+        
         return results
     
-    def run(self, featurizer, learner, sample_rate=1.0, n_trials=10):
+    def run(self, featurizer, learner, sample_rate=1.0, n_trials=10, extra_logging={}, seed=42):
         """Runs the benchmark on the given pipeline.
         
         Args:
@@ -165,9 +168,56 @@ class BinaryClassificationBenchmark():
         Returns:
             dict: A dictionary containing the results of the benchmark.
         """
-        results = {}
-        for name, df in self.get_next_benchmark():
-            results[name] = self.run_pipeline(featurizer, learner,
-                df, sample_rate, n_trials)
+        results = []
+        results_aggregated = []
+        result_total = {}
+
+        for name, loader in self.datasets:
+            result = extra_logging.copy()
+            result["dataset"] = name
+            result["n_trials"] = n_trials
+            if sample_rate < 1.0:
+                result["sample_rate"] = sample_rate
+
+            result.update(
+                self.run_pipeline(featurizer, learner,
+                    loader, seed, sample_rate, n_trials)
+            )
+            results.append(result)
+
+            # Add the result to the total dataset-independent results
+            if result_total == {}:
+                result_total = result.copy()
+                del result_total["dataset"]
+            else:
+                for key, value in result.items():
+                    if isinstance(value, list) and len(value) == n_trials and "shape" not in key:
+                        result_total[key].extend(value)
+        
+            # Add an aggregated results taking mean and stddev of all trials
+            result_aggregated = extra_logging.copy()
+            result_aggregated["dataset"] = name
+            for key, value in result.items():
+                # Check if it's an array
+                if isinstance(value, list) and len(value) == n_trials and "shape" not in key:
+                    result_aggregated[key + "_mean"] = np.mean(value)
+                    result_aggregated[key + "_stddev"] = np.std(value)
+                else:
+                    result_aggregated[key] = value
+            results_aggregated.append(result_aggregated)
             
-        return results
+        # Aggregate the total dataset-independent results
+        result_total_agg = {
+            "dataset": "total",
+        }
+        for key, value in result_total.items():
+            # Check if it's an array
+            if isinstance(value, list) and "shape" not in key:
+                result_total_agg[key + "_mean"] = np.mean(value)
+                result_total_agg[key + "_stddev"] = np.std(value)
+            else:
+                result_total_agg[key] = value
+        
+        results_aggregated.append(result_total_agg)
+        
+        return results, results_aggregated

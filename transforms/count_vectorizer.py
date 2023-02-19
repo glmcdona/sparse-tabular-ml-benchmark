@@ -1,8 +1,8 @@
 from .base import BaseBenchmarkPipeline
-from bloombag import BloomVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 
-class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
-    def __init__(self, delimiter='|', task='classification', n_bags=5, error_rate=0.01, n_features=100000):
+class BenchmarkCountVectorizer(BaseBenchmarkPipeline):
+    def __init__(self, delimiter='|', task='classification', n_features=100000):
         """Initializes the pipeline.
 
         Args:
@@ -15,11 +15,8 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
             n_features (int): Number of features to use sorted by occurence
                 count in the training data.
         """
-        super(BenchmarkBloomVectorizer, self).__init__(delimiter, task)
+        super(BenchmarkCountVectorizer, self).__init__(delimiter, task)
         self.featurizer = None
-        self.size = None
-        self.n_bags = n_bags
-        self.error_rate = error_rate
         self.n_features = n_features
     
 
@@ -34,15 +31,12 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
             y (array): An array of 1 and 0 labels for 'classification'
                 task, or an array of floats for 'regression' task.
         """
-        featurizer = BloomVectorizer(
+        featurizer = CountVectorizer(
             tokenizer = lambda x: x.split(self.delimiter),
-            n_features = self.n_features,
-            n_bags = self.n_bags,
-            error_rate = self.error_rate,
+            max_features = self.n_features,
             token_pattern = None,
         )
         self.featurizer = featurizer.fit(X, y)
-        self.size = featurizer.get_size_in_bytes()
 
     def transform(self, X):
         """Transforms the training data into a feature matrix.
@@ -68,9 +62,14 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
         Returns:
             int: Size of the featurizer steps in bytes.
         """
-        if self.size is None:
+        if self.featurizer is None:
             raise ValueError('Pipeline is not fitted yet.')
-        return self.size
+        
+        size = 0
+        for key in self.featurizer.vocabulary_.keys():
+            size += len(key)
+        
+        return size
     
 
     def get_num_features(self):
@@ -82,5 +81,3 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
         if self.featurizer is None:
             raise ValueError('Pipeline is not fitted yet.')
         return 0
-        return self.featurizer.get_num_features()
-        
