@@ -1,6 +1,7 @@
+import random
 import time
 from sklearn.linear_model import LogisticRegression
-from transforms import BenchmarkBloomVectorizer, BenchmarkCountVectorizer, BenchmarkTfidfVectorizer, BenchmarkHashingVectorizer
+from transforms import BenchmarkStratifiedBagVectorizer, BenchmarkCountVectorizer, BenchmarkTfidfVectorizer, BenchmarkHashingVectorizer
 from functools import partial
 from benchmark import BinaryClassificationBenchmark
 import pandas as pd
@@ -9,28 +10,35 @@ def run_feature_size_benchmark():
     """Runs the benchmark for the feature size of the BloomVectorizer."""
 
     # Define the benchmark vectorizers to test
-    n_bags = 6
     featurizers = {
-        "BloomVectorizer_e0.01_bag6_chi" : partial(
-            BenchmarkBloomVectorizer,
-            n_bags = n_bags,
-            error_rate = 0.01,
+        "StratifiedBagVectorizer_e0_bag30_chi" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 30,
+            error_rate = 0,
             delimiter = '|',
             task = 'classification',
             ranking_method = "chi",
         ),
-        "BloomVectorizer_e0.01_bag6_cv" : partial(
-            BenchmarkBloomVectorizer,
-            n_bags = n_bags,
-            error_rate = 0.01,
+        "StratifiedBagVectorizer_e0_bag300_chi" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 300,
+            error_rate = 0,
             delimiter = '|',
             task = 'classification',
-            ranking_method = "CountVectorizer",
+            ranking_method = "chi",
         ),
-        "BloomVectorizer_e0.01_bag6_tfidf" : partial(
-            BenchmarkBloomVectorizer,
-            n_bags = n_bags,
-            error_rate = 0.01,
+        "StratifiedBagVectorizer_e0_bag30_tfidf" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 30,
+            error_rate = 0,
+            delimiter = '|',
+            task = 'classification',
+            ranking_method = "TfidfVectorizer",
+        ),
+        "StratifiedBagVectorizer_e0_bag300_tfidf" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 300,
+            error_rate = 0,
             delimiter = '|',
             task = 'classification',
             ranking_method = "TfidfVectorizer",
@@ -50,6 +58,39 @@ def run_feature_size_benchmark():
     }
 
     """
+    "StratifiedBagVectorizer_e0.01_bag6_chi" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 6,
+            error_rate = 0.01,
+            delimiter = '|',
+            task = 'classification',
+            ranking_method = "chi",
+        ),
+        "StratifiedBagVectorizer_e0.01_bag6_cv" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 6,
+            error_rate = 0.01,
+            delimiter = '|',
+            task = 'classification',
+            ranking_method = "CountVectorizer",
+        ),
+        "StratifiedBagVectorizer_e0.01_bag6_tfidf" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 6,
+            error_rate = 0.01,
+            delimiter = '|',
+            task = 'classification',
+            ranking_method = "TfidfVectorizer",
+        ),
+        "StratifiedBagVectorizer_e0.001_bag15_tfidf" : partial(
+            BenchmarkStratifiedBagVectorizer,
+            n_bags = 15,
+            error_rate = 0.001,
+            delimiter = '|',
+            task = 'classification',
+            ranking_method = "TfidfVectorizer",
+        ),
+
         "BloomVectorizer_e0.001_bag6" : partial(
             BenchmarkBloomVectorizer,
             n_bags = 6,
@@ -76,7 +117,18 @@ def run_feature_size_benchmark():
     all_results_raw = []
     all_results_aggr = []
     #for n_features in [100000, 10000, 1000, 100]:
-    for n_features in [100000, 10000]:
+    #for n_features in [100000, 10000]:
+    while(True):
+        rand = random.random()
+        if rand < 0.25:
+            n_features = random.randint(10, 1000)
+        elif rand < 0.50:
+            n_features = random.randint(1000, 10000)
+        elif rand < 0.75:
+            n_features = random.randint(10000, 100000)
+        else:
+            n_features = random.randint(100000, 500000)
+
         print(f"\n--- Running benchmark for n_features={n_features} ---")
         for name, featurizer_base in featurizers.items():
             print("Running benchmark for %s..." % name)
@@ -84,15 +136,16 @@ def run_feature_size_benchmark():
                 n_features = n_features,
             )
 
-            learner = LogisticRegression(max_iter=1000)
+            # LR with no regularization
+            learner = LogisticRegression(max_iter=3000, penalty=None)
 
             # Run the benchmark
             benchmark = BinaryClassificationBenchmark()
             result_raw, result_aggr = benchmark.run(
                 featurizer = featurizer,
                 learner = learner,
-                sample_rate = 1.0,
-                n_trials = 1,
+                sample_rate = 0.25,
+                n_trials = 5,
                 extra_logging = {
                     "featurizer" : name,
                     "n_features" : n_features,

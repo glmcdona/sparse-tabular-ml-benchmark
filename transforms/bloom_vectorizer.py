@@ -1,7 +1,7 @@
 from .base import BaseBenchmarkPipeline
-from bloombag import BloomVectorizer
+from bloombag import StratifiedBagVectorizer
 
-class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
+class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
     def __init__(self, delimiter='|', task='classification', n_bags=5, error_rate=0.01, n_features=100000, ranking_method=None):
         """Initializes the pipeline.
 
@@ -15,7 +15,7 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
             n_features (int): Number of features to use sorted by occurence
                 count in the training data.
         """
-        super(BenchmarkBloomVectorizer, self).__init__(delimiter, task)
+        super(BenchmarkStratifiedBagVectorizer, self).__init__(delimiter, task)
         self.featurizer = None
         self.n_bags = n_bags
         self.error_rate = error_rate
@@ -34,7 +34,7 @@ class BenchmarkBloomVectorizer(BaseBenchmarkPipeline):
             y (array): An array of 1 and 0 labels for 'classification'
                 task, or an array of floats for 'regression' task.
         """
-        featurizer = BloomVectorizer(
+        featurizer = StratifiedBagVectorizer(
             tokenizer = lambda x: x.split(self.delimiter),
             n_features = self.n_features,
             n_bags = self.n_bags,

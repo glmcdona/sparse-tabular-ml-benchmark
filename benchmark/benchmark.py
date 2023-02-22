@@ -1,9 +1,30 @@
 import time
-from .loaders import loader_newsgroup_binary, loader_click_prediction
+import copy
+from .loaders import loader_newsgroup_binary, loader_click_prediction, loader_airlines, loader_safe_driver, loader_census_income
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import numpy as np
 from functools import partial
+
+def compute_dataset_properties(df):
+    """
+    Computes the dataset properties for the given dataframe.
+    """
+    description = {}
+
+    # Count the distinct number of features
+    features = set()
+    for f in df["features"].str.split("|"):
+        features.update(f)
+    description["distinct_features"] = len(features)
+    
+    # Copute the target distribution
+    count_positive = df["target"].value_counts().to_dict()[1]
+    description["target_positive"] = count_positive
+    description["target_negative"] = len(df) - count_positive
+    description["target_rate_positive"] = count_positive / len(df)
+    
+    return description
 
 class BinaryClassificationBenchmark():
     def __init__(self, datasets=None):
@@ -15,21 +36,14 @@ class BinaryClassificationBenchmark():
         """
         if datasets is None:
             datasets = [
+                ("census_income", loader_census_income),
+                ("safe_driver", loader_safe_driver),
+                ("airlines", loader_airlines),
                 ("newsgroups", loader_newsgroup_binary),
-                ("loader_click_prediction", loader_click_prediction),
+                ("click_prediction", loader_click_prediction),
             ]
             
         self.datasets = datasets
-
-    def get_next_benchmark(self, seed=42):
-        """Generator returns the next benchmark to run.
-        
-        Returns:
-            tuple: A tuple containing the name of the benchmark, dataframe
-                containing "features" and "target" columns.
-        """
-        for name, loader in self.datasets:
-            yield name, loader(seed=seed)
 
     def run_pipeline(self, featurizer, learner, loader, seed=42, sample_rate=1.0, n_trials=10):
         """Runs the pipeline on the given dataset.
@@ -59,6 +73,11 @@ class BinaryClassificationBenchmark():
             "size_in_bytes_learner": [],
             "size_in_bytes_total": [],
 
+            "distinct_features": [],
+            "target_positive": [],
+            "target_negative": [],
+            "target_rate_positive": [],
+
             "time_total": [],
             "time_train_total": [],
             "time_train_transform_fit": [],
@@ -74,6 +93,13 @@ class BinaryClassificationBenchmark():
             # Load the data with a different seed each time
             df = loader(seed=current_seed)
             current_seed += 1
+
+            # Compute dataset properties
+            dataset_properties = compute_dataset_properties(df)
+
+            # Append dataset properties to results
+            for k, v in dataset_properties.items():
+                results[k].append(v)
 
             X_train, X_test, y_train, y_test = train_test_split(
                 df["features"], df["target"], test_size=0.2)
@@ -170,9 +196,10 @@ class BinaryClassificationBenchmark():
         """
         results = []
         results_aggregated = []
-        result_total = {}
+        result_total = None
 
         for name, loader in self.datasets:
+            print(f"... dataset {name}...")
             result = extra_logging.copy()
             result["dataset"] = name
             result["n_trials"] = n_trials
@@ -183,12 +210,12 @@ class BinaryClassificationBenchmark():
                 self.run_pipeline(featurizer, learner,
                     loader, seed, sample_rate, n_trials)
             )
-            results.append(result)
+            results.append(copy.deepcopy(result))
 
             # Add the result to the total dataset-independent results
-            if result_total == {}:
-                result_total = result.copy()
-                del result_total["dataset"]
+            if result_total is None:
+                result_total = copy.deepcopy(result)
+                result_total["dataset"] = "total"
             else:
                 for key, value in result.items():
                     if isinstance(value, list) and len(value) == n_trials and "shape" not in key:
@@ -205,7 +232,7 @@ class BinaryClassificationBenchmark():
                 else:
                     result_aggregated[key] = value
             results_aggregated.append(result_aggregated)
-            
+        
         # Aggregate the total dataset-independent results
         result_total_agg = {
             "dataset": "total",
@@ -215,6 +242,9 @@ class BinaryClassificationBenchmark():
             if isinstance(value, list) and "shape" not in key:
                 result_total_agg[key + "_mean"] = np.mean(value)
                 result_total_agg[key + "_stddev"] = np.std(value)
+                result_total_agg["n_trials"] = len(value)
+            elif key == "n_trials":
+                pass
             else:
                 result_total_agg[key] = value
         
