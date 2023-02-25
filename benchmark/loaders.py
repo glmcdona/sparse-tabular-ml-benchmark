@@ -5,12 +5,120 @@ import os
 import numpy as np
 
 
+def load_bitcoin_ransomware(save_folder=".\\data\\", seed=42):
+    """
+    Akcora, C.G., Li, Y., Gel, Y.R. and Kantarcioglu, M., 2019. BitcoinHeist. Topological
+    Data Analysis for Ransomware Detection on the Bitcoin Blockchain. IJCAI-PRICAI 2020.
+    See: https://www.openml.org/d/42553
+    """
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+    filename = os.path.join(save_folder, f"bitcoin_ransomware_{seed}.csv")
+    if not os.path.exists(filename):
+        data = fetch_openml(data_id = 42553, as_frame = True, parser = "auto", cache = True)
+        df = data.frame
 
-def loader_airlines(save_folder=".", seed=42):
+        # Downsample to random 500K rows
+        df = df.sample(n=500_000, random_state=seed)
+
+        df = df.drop(columns=["address"])
+
+        # Bin all the columns except label into up to 500 bins each
+        for col in df.columns:
+            if col != "label":
+                if df[col].nunique() > 500:
+                    df[col] = pd.cut(df[col], bins=500, labels=False)
+
+        # Convert to binary classification problem
+        df["target"] = df["label"].apply(lambda x: 1 if x == "white" else 0)
+        df = df.drop(columns=["label"])
+
+        # Create multiple categorical features:
+        #  1. 10 hashes from random 60% of categorical columns combined
+        np.random.seed(seed)
+        columns = list(df.columns)
+        columns.remove("target")  
+
+        max_hash_value = 100_000_000
+
+        for i in range(10):
+            np.random.shuffle(columns)
+            df[f"features_{i}"] = df[columns[:int(len(columns) * 0.6)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
+        df["features_all"] = df.apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
+        
+        # Combine all categorical features into one value separated by "|"
+        columns.extend( [f for f in df.columns if f.startswith("features_")] )
+        df["features"] = df[columns].apply(lambda x: "|".join([f"{i}:{v}" for i, v in enumerate(x)]), axis=1)
+
+        df["target"] = df["target"].astype(int)
+
+        # Print column names with counts of unique values
+        #for col in df.columns:
+        #    print(f"{col}: {df[col].nunique()}")
+
+        # Write to csv
+        df[["features", "target"]].to_csv(filename, index=False)
+    else:
+        df = pd.read_csv(filename)
+
+    return df
+
+def loader_network_attack(save_folder=".\\data\\", seed=42):
+    """
+    Loads the KDDCup99 network intrusion dataset
+    See: https://www.openml.org/d/1113
+    """
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+    filename = os.path.join(save_folder, f"network_attack_{seed}.csv")
+    if not os.path.exists(filename):
+        data = fetch_openml(data_id = 1113, as_frame = True, parser = "auto", cache = True)
+        df = data.frame
+
+        # Drop all columns that have more than 50 unique values
+        df = df.drop(columns=[col for col in df.columns if df[col].nunique() > 200])
+
+        # Convert to binary classification problem
+        df["target"] = df["label"].apply(lambda x: 1 if x == "normal" else 0)
+        df = df.drop(columns=["label"])
+
+        # Create multiple categorical features:
+        #  1. 10 hashes from random 25% of categorical columns combined
+        #  2. 10 hashes from random 40% of categorical columns combined
+        #  3. 4 hashes from random 60% of categorical columns combined
+        #  4. 1 hash from all categorical columns combined
+        np.random.seed(seed)
+        columns = list(df.columns)
+        columns.remove("target")  
+
+        max_hash_value = 100_000_000
+
+        for i in range(10):
+            np.random.shuffle(columns)
+            df[f"features_{i}"] = df[columns[:int(len(columns) * 0.6)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
+        df["features_all"] = df.apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
+        
+        # Combine all categorical features into one value separated by "|"
+        columns.extend( [f for f in df.columns if f.startswith("features_")] )
+        df["features"] = df[columns].apply(lambda x: "|".join([f"{i}:{v}" for i, v in enumerate(x)]), axis=1)
+
+        df["target"] = df["target"].astype(int)
+
+        # Write to csv
+        df[["features", "target"]].to_csv(filename, index=False)
+    else:
+        df = pd.read_csv(filename)
+
+    return df
+
+
+def loader_airlines(save_folder=".\\data\\", seed=42):
     """
     Loads the airlines dataset.
     See: https://www.openml.org/d/1169
     """
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
     
     filename = os.path.join(save_folder, f"airlines_{seed}.csv")
     if not os.path.exists(filename):
@@ -52,13 +160,15 @@ def loader_airlines(save_folder=".", seed=42):
 
 
 
-def loader_safe_driver(save_folder=".", seed=42):
+def loader_safe_driver(save_folder=".\\data\\", seed=42):
     """
     'Porto Seguros Safe Driver Prediction' Kaggle challenge
     [https://www.kaggle.com/c/porto-seguro-safe-driver-prediction]
     See: https://www.openml.org/d/42742
     """
-    seed = 42
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+
     filename = os.path.join(save_folder, f"safe_driver_{seed}.csv")
     if not os.path.exists(filename):
         data = fetch_openml(data_id = 42742, as_frame = True, parser = "auto", cache = True)
@@ -78,15 +188,15 @@ def loader_safe_driver(save_folder=".", seed=42):
 
         max_hash_value = 100_000_000
 
-        for i in range(10):
-            np.random.shuffle(columns)
-            df[f"features_{i}"] = df[columns[:int(len(columns) * 0.25)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
+        #for i in range(10):
+        #    np.random.shuffle(columns)
+        #    df[f"features_{i}"] = df[columns[:int(len(columns) * 0.25)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
         for i in range(10):
             np.random.shuffle(columns)
             df[f"features_{i + 10}"] = df[columns[:int(len(columns) * 0.4)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
-        for i in range(1):
-            np.random.shuffle(columns)
-            df[f"features_{i + 20}"] = df[columns[:int(len(columns) * 0.60)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
+        #for i in range(1):
+        #    np.random.shuffle(columns)
+        #    df[f"features_{i + 20}"] = df[columns[:int(len(columns) * 0.60)]].apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
         df["features_24"] = df.apply(lambda x: hash(tuple(x)) % max_hash_value, axis=1)
         
         # Combine all categorical features into one value separated by "|"
@@ -108,12 +218,15 @@ def loader_safe_driver(save_folder=".", seed=42):
 
 
 
-def loader_census_income(save_folder=".", seed=42):
+def loader_census_income(save_folder=".\\data\\", seed=42):
     """
     https://www.openml.org/d/42750
     This version has feature names based on
     https://www2.1010data.com/documentationcenter/beta/Tutorials/MachineLearningExamples/CensusIncomeDataSet.html
     """
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+
     filename = os.path.join(save_folder, f"census_income_{seed}.csv")
     if not os.path.exists(filename):
         data = fetch_openml(data_id = 42750, as_frame = True, parser = "auto", cache = True)
@@ -156,7 +269,7 @@ def loader_census_income(save_folder=".", seed=42):
 
     return df
 
-def loader_click_prediction(save_folder=".", seed=42):
+def loader_click_prediction(save_folder=".\\data\\", seed=42):
     """
     Loads the click prediction dataset.
     See: https://www.openml.org/d/1219
@@ -165,6 +278,8 @@ def loader_click_prediction(save_folder=".", seed=42):
     column delimited by "|". The column index is used as a prefix to each token
     to avoid collisions.
     """
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
     
     filename = os.path.join(save_folder, f"click_prediction_{seed}.csv")
     if not os.path.exists(filename):
@@ -203,9 +318,8 @@ def loader_click_prediction(save_folder=".", seed=42):
 
     return df
 
-def loader_newsgroup_binary(save_folder=".", word_grams=1, seed=42):
+def loader_newsgroup_binary(save_folder=".\\data\\", word_grams=1, seed=42):
     """Returns the 20 Newsgroups dataset as a binary classification problem."""
-    # check if csv file exists
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
@@ -271,7 +385,7 @@ def loader_newsgroup_binary(save_folder=".", word_grams=1, seed=42):
 
 if __name__ == "__main__":
     #df = loader_airlines()
-    df = loader_census_income()
+    df = load_bitcoin_ransomware()
 
     print(df.head(100))
 

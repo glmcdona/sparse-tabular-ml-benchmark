@@ -1,8 +1,10 @@
+import numpy as np
 from .base import BaseBenchmarkPipeline
 from bloombag import StratifiedBagVectorizer
+from sklearn.pipeline import Pipeline, FeatureUnion
 
-class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
-    def __init__(self, delimiter='|', task='classification', n_bags=5, error_rate=0.01, n_features=100000, ranking_method=None):
+class BenchmarkMultiVectorizer(BaseBenchmarkPipeline):
+    def __init__(self, vectorizer_classes=[], n_features=100000):
         """Initializes the pipeline.
 
         Args:
@@ -15,12 +17,11 @@ class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
             n_features (int): Number of features to use sorted by occurence
                 count in the training data.
         """
-        super(BenchmarkStratifiedBagVectorizer, self).__init__(delimiter, task)
-        self.featurizer = None
-        self.n_bags = n_bags
-        self.error_rate = error_rate
-        self.n_features = n_features
-        self.ranking_method = ranking_method
+        super(BenchmarkMultiVectorizer, self).__init__("|", "classification")
+
+        self.pipeline = []
+        for vectorizer_class in vectorizer_classes:
+            self.pipeline.append(vectorizer_class(n_features=n_features))
     
 
     def fit(self, X, y):
@@ -34,15 +35,8 @@ class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
             y (array): An array of 1 and 0 labels for 'classification'
                 task, or an array of floats for 'regression' task.
         """
-        featurizer = StratifiedBagVectorizer(
-            tokenizer = lambda x: x.split(self.delimiter),
-            n_features = self.n_features,
-            n_bags = self.n_bags,
-            error_rate = self.error_rate,
-            token_pattern = None,
-            ranking_method = self.ranking_method,
-        )
-        self.featurizer = featurizer.fit(X, y)
+        for vectorizer in self.pipeline:
+            vectorizer.fit(X, y)
 
     def transform(self, X):
         """Transforms the training data into a feature matrix.
@@ -57,10 +51,22 @@ class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
             numpy.ndarray: An array of features that will be passed to the
                 learner.
         """
-        if self.featurizer is None:
+        if self.pipeline is None:
             raise ValueError('Pipeline is not fitted yet.')
-        return self.featurizer.transform(X)
         
+        # Iterate through the steps and transform the data, and
+        # union the results together
+        return_result = None
+        for vectorizer in self.pipeline:
+            result = vectorizer.transform(X)
+            if type(result) is not np.ndarray:
+                result = result.toarray()
+            if return_result is None:
+                return_result = result
+            else:
+                return_result = np.concatenate((return_result, result), axis=1)
+
+        return return_result
     
     def get_size_in_bytes(self):
         """Returns the full size of the featurizer in bytes.
@@ -68,10 +74,14 @@ class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
         Returns:
             int: Size of the featurizer steps in bytes.
         """
-        if self.featurizer is None:
+        if self.pipeline is None:
             raise ValueError('Pipeline is not fitted yet.')
-        
-        return self.featurizer.get_size_in_bytes()
+
+        # Iterate through the steps and sum the size of each featurizer
+        size = 0
+        for vectorizer in self.pipeline:
+            size += vectorizer.get_size_in_bytes()
+        return size
     
 
     def get_num_features(self):
@@ -80,7 +90,12 @@ class BenchmarkStratifiedBagVectorizer(BaseBenchmarkPipeline):
         Returns:
             int: Number of features in the featurizer.
         """
-        if self.featurizer is None:
+        if self.pipeline is None:
             raise ValueError('Pipeline is not fitted yet.')
-        return 0
+        
+        # Iterate through the steps and sum the number of features
+        num_features = 0
+        for vectorizer in self.pipeline:
+            num_features += vectorizer.get_num_features()
+        return num_features
         

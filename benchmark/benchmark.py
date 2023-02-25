@@ -1,6 +1,6 @@
 import time
 import copy
-from .loaders import loader_newsgroup_binary, loader_click_prediction, loader_airlines, loader_safe_driver, loader_census_income
+from .loaders import loader_newsgroup_binary, loader_click_prediction, loader_airlines, loader_safe_driver, loader_census_income, loader_network_attack, load_bitcoin_ransomware
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import numpy as np
@@ -36,6 +36,8 @@ class BinaryClassificationBenchmark():
         """
         if datasets is None:
             datasets = [
+                ("bitcoin_ransomware", load_bitcoin_ransomware),
+                ("network_attack", loader_network_attack),
                 ("census_income", loader_census_income),
                 ("safe_driver", loader_safe_driver),
                 ("airlines", loader_airlines),
