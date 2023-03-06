@@ -64,7 +64,10 @@ def run_feature_size_benchmark():
             print("Running benchmark for %s..." % name)
             learner = LogisticRegression(**learner_args)
             print(featurizer_base[0])
-            featurizer = eval(featurizer_base[0])(**featurizer_base[1])
+            featurizer = eval(featurizer_base[0])(
+                **featurizer_base[1],
+                n_features = n_features,
+            )
 
             # Run the benchmark
             benchmark = BinaryClassificationBenchmark(
