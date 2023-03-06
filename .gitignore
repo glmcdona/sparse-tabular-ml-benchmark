@@ -8,6 +8,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+stratified_vectorizer/
 build/
 develop-eggs/
 dist/

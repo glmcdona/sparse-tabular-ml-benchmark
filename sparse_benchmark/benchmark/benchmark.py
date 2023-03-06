@@ -1,7 +1,10 @@
+import hashlib
 import json
+import math
 import os
 import shutil
 import tempfile
+import threading
 import time
 import copy
 from .loaders import loader_newsgroup, loader_click_prediction, loader_airlines, loader_safe_driver, loader_census_income, loader_network_attack, loader_bitcoin_ransomware
@@ -458,93 +461,142 @@ class BinaryClassificationBenchmark():
         # Now run the featurization and learning jobs
         print("Creating benchmark trial runs...")
         steps = []
-        for id, queue_item in enumerate(self.queue):
+        for queue_item in self.queue:
+            m = hashlib.sha256()
+            m.update(json.dumps(queue_item).encode("utf-8"))
+            m.update(str(n_trials).encode("utf-8"))
+            m.update(str(seed).encode("utf-8"))
+            id = m.hexdigest()[:8]
+
             for dataset in self.datasets:
-                for trial in range(n_trials):
-                    name = f"{queue_item['name']}_{dataset[0]}_{seed + trial}_id{id}"
+                name = f"{queue_item['name']}_{dataset[0]}_{id}"
 
-                    output_name = f"{name}.json"
-
-                    step_output_path = OutputFileDatasetConfig(
-                        name="output_path",
+                # Create the output json file
+                output_name = f"{name}.json"
+                
+                step_output_path = OutputFileDatasetConfig(
+                        name="step_output_path",
                         destination=(datastore, f"{output_path}")
                     )
 
-                    # Create the input folder
-                    input_folder = f"{data_path}/{dataset[0]}/"
-                    input_name = f"{dataset[0]}_{seed + trial}.csv"
+                # Check if the file already exists in the datastore already
+                try:
+                    print(os.path.join(output_path, output_name))
+                    file_dataset = Dataset.File.from_files(path=(datastore, os.path.join(output_path, output_name)))
+                    if file_dataset is not None:
+                        print(f"Skipping processing {name} because data already exists")
+                        continue
+                except:
+                    pass
 
-                    input_file_path = DataPath(datastore, os.path.join(input_folder, input_name))
-                    data_path_pipeline_param = (PipelineParameter(name=name, default_value=input_file_path),
-                                                DataPathComputeBinding(mode='mount'))
-                    
-                    # Create the step
-                    steps.append(
-                        PythonScriptStep(
-                            name=name,
-                            script_name="aml_run_trial.py",
-                            arguments=[
-                                "--in_csv", data_path_pipeline_param,
-                                "--out_folder", step_output_path,
-                                "--out_json_name", output_name,
-                                "--name", name,
-                                "--featurizer_class_name", queue_item['featurizer_class_name'],
-                                "--featurizer_args", str(queue_item['featurizer_args']),
-                                "--learner_class_name", queue_item['learner_class_name'],
-                                "--learner_args", str(queue_item['learner_args']),
-                                "--sample_rate", queue_item['sample_rate'],
-                                "--extra_logging", str(queue_item['extra_logging']),
-                                "--seed", seed + trial,
-                            ],
-                            inputs=[data_path_pipeline_param],
-                            outputs=[step_output_path],
-                            compute_target=compute_target,
-                            source_directory=".",
-                            runconfig=RunConfiguration(
-                                    conda_dependencies=CondaDependencies.create(
-                                        conda_packages=[], 
-                                        pip_packages=['azureml-sdk', 'numpy', 'pandas', 'scikit-learn',
-                                            "git+https://github.com/glmcdona/stratified-vectorizer.git"],
-                                        pin_sdk_version=False
-                                    )
-                                ),
-                        )
+                # Input all the csv files
+                in_csvs = []
+                for trial in range(n_trials):
+                    in_csvs.append("--in_csvs")
+                    in_csvs.append(f"{dataset[0]}_{seed + trial}.csv")
+                
+                # Create the input folder
+                input_folder = f"{data_path}/{dataset[0]}/"
+                input_folder = DataPath(datastore, input_folder)
+                data_path_pipeline_param = (PipelineParameter(name=f"{name}_{trial}", default_value=input_folder),
+                                            DataPathComputeBinding(mode='mount'))
+                
+                # Create the step
+                steps.append(
+                    PythonScriptStep(
+                        name=name,
+                        script_name="aml_run_trial.py",
+                        arguments=in_csvs + [
+                            "--in_folder", data_path_pipeline_param,
+                            "--out_folder", step_output_path,
+                            "--out_json_name", output_name,
+                            "--name", name,
+                            "--featurizer_class_name", queue_item['featurizer_class_name'],
+                            "--featurizer_args", str(queue_item['featurizer_args']),
+                            "--learner_class_name", queue_item['learner_class_name'],
+                            "--learner_args", str(queue_item['learner_args']),
+                            "--sample_rate", queue_item['sample_rate'],
+                            "--extra_logging", str(queue_item['extra_logging']),
+                            "--seed", seed,
+                        ],
+                        inputs=[data_path_pipeline_param],
+                        outputs=[step_output_path],
+                        compute_target=compute_target,
+                        source_directory=".",
+                        runconfig=RunConfiguration(
+                                conda_dependencies=CondaDependencies.create(
+                                    conda_packages=[], 
+                                    pip_packages=['azureml-sdk', 'numpy', 'pandas', 'scikit-learn', 'fastbloom-rs'],
+                                        #"git+https://github.com/glmcdona/stratified-vectorizer.git",
+                                        #"binary2strings"],
+                                    pin_sdk_version=False
+                                )
+                            ),
                     )
+                )
         
-        # Create the pipeline
-        print("Submitting trial benchmark runs...")
-        pipeline = Pipeline(workspace=workspace, steps=steps)
-        pipeline_run = experiment.submit(pipeline, continue_on_step_failure=True)
+        # Submit the steps in batches multithreaded
+        def submit_batch(steps, experiment, workspace, compute_target):
+            pipeline = Pipeline(workspace=workspace, steps=steps)
+            pipeline_run = experiment.submit(pipeline, continue_on_step_failure=True)
+            print(f"Pipeline submitted for execution: {pipeline_run.id}")
+            while pipeline_run.get_status() != "Finished":
+                time.sleep(20)
+            print(f"Pipeline finished: {pipeline_run.id}")
 
-        # Wait for the data preparation pipeline to finish
-        pipeline_run.wait_for_completion()
+        threads = []
+        print(f"Submitting {len(steps)} steps total...")
+        if len(steps) > 0:
+            n_batches = 5
+            batch_size = math.ceil(len(steps) / n_batches)
+            pipelines = []
+            for i in range(0, len(steps), batch_size):
+                print(f"Submitting batch {i} to {i+batch_size}...")
+                pipeline = Pipeline(workspace=workspace, steps=steps)
+                pipeline_run = experiment.submit(pipeline, continue_on_step_failure=True)
+                pipelines.append(pipeline_run)
+                print(f"Pipeline submitted for execution: {pipeline_run.id}")
+        
+            print("\nWaiting for pipelines to finish...")
+            for pipeline_run in pipelines:
+                while pipeline_run.get_status() != "Finished":
+                    time.sleep(20)
+                print(f"Pipeline finished: {pipeline_run.id}")
 
         # Now merge the results
         print("Merging results...")
 
         # Check if the file already exists in the datastore already
         results = []
-        for id, queue_item in enumerate(self.queue):
+        for queue_item in self.queue:
+            m = hashlib.sha256()
+            m.update(json.dumps(queue_item).encode("utf-8"))
+            m.update(str(n_trials).encode("utf-8"))
+            m.update(str(seed).encode("utf-8"))
+            id = m.hexdigest()[:8]
+            
             for dataset in self.datasets:
-                for trial in range(n_trials):
-                    name = f"{queue_item['name']}_{dataset[0]}_{seed + trial}_id{id}"
-                    output_name = f"{name}.json"
-                    try:
-                        file_dataset = Dataset.File.from_files(path=(datastore, os.path.join(output_path, output_name)))
-                        if file_dataset is not None:
-                            # Open the file and read the results
-                            print(f"Found {name} in the datastore. Adding to results.")
-                            files = file_dataset.download()
-                            print(files)
+                name = f"{queue_item['name']}_{dataset[0]}_{id}"
+                output_name = f"{name}.json"
 
-                            with open(files[0], 'r') as f:
-                                # Print the file contents
-                                data = {"dataset": dataset[0]}
-                                data.update(json.load(f))
-                                results.append(data)
-                    except:
-                        print(f"ERROR: Could not find {name} in the datastore. Skipping this result.")
-                        pass
+                try:
+                    file_dataset = Dataset.File.from_files(path=(datastore, os.path.join(output_path, output_name)))
+                    if file_dataset is not None:
+                        # Open the file and read the results
+                        print(f"Found {name} in the datastore. Adding to results.")
+                        files = file_dataset.download()
+                        print(files)
+
+                        with open(files[0], 'r') as f:
+                            # Print the file contents
+                            data = {"dataset": dataset[0]}
+                            for result in json.load(f):
+                                entry = copy.deepcopy(data)
+                                entry.update(result)
+                                results.append(entry)
+                except:
+                    print(f"ERROR: Could not find {output_name} in the datastore. Skipping this result.")
+                    pass
         
         # Aggregate the results
         group_by = ["dataset"]
