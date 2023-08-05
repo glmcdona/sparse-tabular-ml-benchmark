@@ -3,7 +3,6 @@ import os
 import numpy as np
 import pandas as pd
 from sparse_benchmark.benchmark import standard_datasets
-from azureml.core import Run
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -18,9 +17,6 @@ if __name__ == "__main__":
 
     # Uses the data loader to load the data, and write it as a csv file
     # to the output_data_path
-
-    # Get the Azure ML run
-    run = Run.get_context()
 
     # Get the dataset
     dataset = args.dataset

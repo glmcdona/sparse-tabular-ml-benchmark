@@ -10,11 +10,15 @@ setup(
 
     install_requires=[
         "pandas",
-        "azureml-core",
-        "azureml-pipeline-core",
-        "azureml-pipeline",
-        "sklearn",
-        "stratified_vectorizer",
-        "fsspec",
-    ]
+        "azure-ai-ml",
+        "azure-identity",
+        "scikit-learn",
+        "azureml-fsspec",
+        "mltable"
+    ],
+    extras_require={
+        'stratified-vectorizer': [
+            'stratified_vectorizer @ git+https://github.com/glmcdona/stratified-vectorizer.git'
+        ]
+    }
 )

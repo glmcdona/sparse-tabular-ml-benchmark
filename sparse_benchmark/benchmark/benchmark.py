@@ -14,6 +14,14 @@ from sklearn.preprocessing import MaxAbsScaler
 import numpy as np
 from functools import partial
 
+from azure.ai.ml import MLClient
+from azure.ai.ml.entities import Environment
+from azureml.fsspec import AzureMachineLearningFileSystem
+from azure.ai.ml import command, Input, Output, MLClient, UserIdentityConfiguration, ManagedIdentityConfiguration
+from azure.ai.ml.entities import Data
+from azure.ai.ml.constants import AssetTypes, InputOutputModes
+from azure.identity import DefaultAzureCredential
+
 
 standard_datasets = [
     ("bitcoin_ransomware", loader_bitcoin_ransomware),
@@ -358,12 +366,11 @@ class BinaryClassificationBenchmark():
 
     def run_queue_azure_aml(
                 self,
-                workspace,
-                datastore,
-                experiment_name,
+                ml_client : MLClient,
                 compute_target,
-                data_path,
-                output_path,
+                root_storage_path,
+                relative_data_path,
+                experiment_name,
                 n_trials = 10,
                 seed = 42,
             ):
@@ -383,80 +390,115 @@ class BinaryClassificationBenchmark():
             n_trials (int): Number of trials to run for each dataset.
             seed (int): The random seed.
         """
-        import azureml.core
-        from azureml.core import Workspace,  Experiment, Dataset
-        from azureml.core.compute import AmlCompute
-        from azureml.core.runconfig import RunConfiguration
-        from azureml.core.conda_dependencies import CondaDependencies
-        import azureml
-        from azureml.pipeline.core import Pipeline, PipelineParameter, PipelineData
-        from azureml.pipeline.steps import PythonScriptStep
-        from azureml.data import FileDataset, OutputFileDatasetConfig
-        from azureml.data.datapath import DataPath, DataPathComputeBinding
 
+        # Create the environment if it doesn't exist yet
+        custom_env_name = "sparse-featurizer-env"
+        dependencies_dir = "./aml/env"
+        source_dir = "./aml/src"
 
-        print("Using AzureML SDK version:", azureml.core.VERSION)
+        job_envs = list(ml_client.environments.list(custom_env_name))
+        if len(job_envs) == 0:
+            # Create the environment
+            job_env = Environment(
+                name=custom_env_name,
+                description="Custom environment for sparse featurizer experiments",
+                conda_file=os.path.join(dependencies_dir, "conda.yaml"),
+                image="mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04:latest",
+            )
+
+            job_env = ml_client.environments.create_or_update(job_env)
+
+            print(
+                f"Environment with name {job_env.name} is registered to workspace, the environment version is {job_env.version}"
+            )
+        else:
+            job_env = job_envs[-1]
+            print(f"Using existing environment with name {job_env.name} and version {job_env.version}")
         
+        # Copy sparse_benchmark into the dependencies dir for AML to use
+        if not os.path.exists(source_dir):
+            os.makedirs(source_dir)
+        shutil.rmtree(os.path.join(source_dir, "sparse_benchmark"), ignore_errors=True)
+        shutil.copytree("./sparse_benchmark", os.path.join(source_dir, "sparse_benchmark"))
+        
+        fs = AzureMachineLearningFileSystem(root_storage_path)
 
         # Download and create the datasets first, some of them take a while
-        # so we do this in parallel
-        experiment = Experiment(workspace, experiment_name)
-        steps = []
-        
+        jobs = []
         for dataset in self.datasets:
             print(f"Loading {dataset[0]}...")
+
+            # Load the csv files for this dataset
+            dataset_csvs = fs.glob(path=f"{relative_data_path}/data/{dataset[0]}/*.csv")
+            print(f"Found {len(dataset_csvs)} datasets in the datastore for {dataset[0]}")
+            print(dataset_csvs)
             
             for trial in range(n_trials):
                 name = f"loader_{dataset[0]}_{seed + trial}"
 
-                step_output_path = f"{data_path}/{dataset[0]}/"
                 output_name = f"{dataset[0]}_{seed + trial}.csv"
+                output_full_path = f"azureml://datastores/workspaceblobstore/paths/{relative_data_path}/data/{dataset[0]}/{output_name}"
 
-                # Check if the file already exists in the datastore already
-                try:
-                    file_dataset = Dataset.File.from_files(path=(datastore, os.path.join(step_output_path, output_name)))
-                    if file_dataset is not None:
-                        print(f"Skipping {name} because data already exists")
-                        continue
-                except:
-                    pass
+                # Check if the file already exists in the datastore
+                #if f"{relative_data_path}/data/{dataset[0]}/{output_name}" in dataset_csvs:
+                print(os.path.join(relative_data_path, "data", dataset[0], output_name))
+                if os.path.join(relative_data_path, "data", dataset[0], output_name).replace("\\", "/") in dataset_csvs:
+                    print(f"Skipping {name} because data already exists")
+                    continue
                 
-                step_output_path = OutputFileDatasetConfig(
-                    name="step_output_path",
-                    destination=(datastore, step_output_path)
+                print(f"Creating step {name} for {dataset[0]}")
+
+                # Create the job
+                job = command(
+                    inputs=dict(
+                        dataset = dataset[0],
+                        output_name = output_name,
+                        seed = seed + trial,
+                    ),
+                    outputs = dict(
+                        output_path = Output(
+                            type = AssetTypes.URI_FILE, 
+                            path = output_full_path, 
+                            mode = InputOutputModes.RW_MOUNT,
+                        )
+                    ),
+                    compute = compute_target,
+                    environment = f"{job_env.name}:{job_env.version}",
+                    code = "./aml/src/",
+                    command = "python aml_load_dataset.py --dataset ${{inputs.dataset}} --output_path ${{outputs.output_path}} --output_name ${{inputs.output_name}} --seed ${{inputs.seed}}",
+                    experiment_name = "sparse-featurizer-data-prep",
+                    display_name = name,
                 )
 
-                # Create the step
-                steps.append(
-                    PythonScriptStep(
-                        name=name,
-                        script_name="aml_load_dataset.py",
-                        arguments=[
-                            "--dataset", dataset[0],
-                            "--output_path", step_output_path,
-                            "--output_name", output_name,
-                            "--seed", seed + trial,
-                        ],
-                        inputs=[],
-                        outputs=[step_output_path],
-                        compute_target=compute_target,
-                        source_directory=".",
-                        runconfig=RunConfiguration(
-                                conda_dependencies=CondaDependencies.create(
-                                    conda_packages=[], 
-                                    pip_packages=['azureml-sdk', 'numpy', 'pandas', 'scikit-learn'], 
-                                    pin_sdk_version=False)
-                            ),
-                    )
-                )
+                # Submit the command
+                jobs.append(ml_client.jobs.create_or_update(job))
 
-        if len(steps) > 0:
-            # Create the pipeline
-            pipeline = Pipeline(workspace=workspace, steps=steps)
-            pipeline_run = experiment.submit(pipeline, continue_on_step_failure=True)
+        if len(jobs) > 0:
+            # Wait for completion
+            print("Waiting for data loading jobs to complete...")
             
-            # Wait for the data preparation pipeline to finish
-            pipeline_run.wait_for_completion()
+            while True:
+                status = {}
+                for job in jobs:
+                    job_status = ml_client.jobs.get(name=job.name).status
+                    if job_status not in status:
+                        status[job_status] = 0
+                    status[job_status] += 1
+                
+                print(status)
+
+                if all([s in ["Completed", "Failed"] for s in status.keys()]):
+                    break
+                
+                time.sleep(5)
+            
+            # Check for failures
+            if any([s == "Failed" for s in status.keys()]):
+                raise RuntimeError("One or more data loading jobs failed")
+            
+            print("Data loading jobs completed successfully")
+                
+
         
         # Now run the featurization and learning jobs
         print("Creating benchmark trial runs...")
@@ -526,9 +568,8 @@ class BinaryClassificationBenchmark():
                         runconfig=RunConfiguration(
                                 conda_dependencies=CondaDependencies.create(
                                     conda_packages=[], 
-                                    pip_packages=['azureml-sdk', 'numpy', 'pandas', 'scikit-learn', 'fastbloom-rs'],
-                                        #"git+https://github.com/glmcdona/stratified-vectorizer.git",
-                                        #"binary2strings"],
+                                    pip_packages=['azureml-sdk', 'numpy', 'pandas', 'scikit-learn', 'fastbloom-rs',
+                                        "git+https://github.com/glmcdona/stratified-vectorizer.git"],
                                     pin_sdk_version=False
                                 )
                             ),

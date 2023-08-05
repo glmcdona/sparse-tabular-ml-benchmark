@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# sparse_benchmark AML distribution
+aml/src/sparse_benchmark/
+
 # Distribution / packaging
 .Python
 stratified_vectorizer/
