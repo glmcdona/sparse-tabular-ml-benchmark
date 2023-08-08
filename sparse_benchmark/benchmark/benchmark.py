@@ -97,11 +97,17 @@ class BinaryClassificationBenchmark():
 
 
         results.update({
-            "roc_auc": [],
-            "f1": [],
-            "accuracy": [],
-            "precision": [],
-            "recall": [],
+            "test_roc_auc": [],
+            "test_f1": [],
+            "test_accuracy": [],
+            "test_precision": [],
+            "test_recall": [],
+
+            "train_roc_auc": [],
+            "train_f1": [],
+            "train_accuracy": [],
+            "train_precision": [],
+            "train_recall": [],
 
             "number_of_features": [],
             "train_shape_before_transform": [],
@@ -122,6 +128,7 @@ class BinaryClassificationBenchmark():
             "time_train_transform_fit": [],
             "time_train_transform": [],
             "time_train_fit": [],
+            "time_train_score": [],
             "time_test_total": [],
             "time_test_transform": [],
             "time_test_score": [],
@@ -168,7 +175,18 @@ class BinaryClassificationBenchmark():
         learner.fit(X_train, y_train)
         results["time_train_fit"].append(time.perf_counter_ns() - start)
 
-        # Score transform
+        # Score and compute the train metrics
+        start = time.perf_counter_ns()
+        y_pred = learner.predict(X_train)
+        results["time_train_score"].append(time.perf_counter_ns() - start)
+
+        results["train_roc_auc"].append(roc_auc_score(y_train, y_pred))
+        results["train_f1"].append(f1_score(y_train, y_pred))
+        results["train_accuracy"].append(accuracy_score(y_train, y_pred))
+        results["train_precision"].append(precision_score(y_train, y_pred))
+        results["train_recall"].append(recall_score(y_train, y_pred))
+
+        # Transform test data
         results["test_shape_before_transform"].append(X_test.shape)
         start = time.perf_counter_ns()
         X_test = featurizer.transform(X_test)
@@ -178,16 +196,16 @@ class BinaryClassificationBenchmark():
         # Scale the data
         X_test = scaler.transform(X_test)
 
+        # Score and compute the test metrics
         start = time.perf_counter_ns()
         y_pred = learner.predict(X_test)
         results["time_test_score"].append(time.perf_counter_ns() - start)
-
-        # Compute metrics
-        results["roc_auc"].append(roc_auc_score(y_test, y_pred))
-        results["f1"].append(f1_score(y_test, y_pred))
-        results["accuracy"].append(accuracy_score(y_test, y_pred))
-        results["precision"].append(precision_score(y_test, y_pred))
-        results["recall"].append(recall_score(y_test, y_pred))
+        
+        results["test_roc_auc"].append(roc_auc_score(y_test, y_pred))
+        results["test_f1"].append(f1_score(y_test, y_pred))
+        results["test_accuracy"].append(accuracy_score(y_test, y_pred))
+        results["test_precision"].append(precision_score(y_test, y_pred))
+        results["test_recall"].append(recall_score(y_test, y_pred))
 
         # Compute total times
         results["time_train_total"].append(
@@ -397,7 +415,7 @@ class BinaryClassificationBenchmark():
         source_dir = "./aml/src"
 
         job_envs = list(ml_client.environments.list(custom_env_name))
-        if len(job_envs) == 0:
+        if len(job_envs) == 0 or True:
             # Create the environment
             job_env = Environment(
                 name=custom_env_name,
@@ -452,11 +470,10 @@ class BinaryClassificationBenchmark():
                 job = command(
                     inputs=dict(
                         dataset = dataset[0],
-                        output_name = output_name,
                         seed = seed + trial,
                     ),
                     outputs = dict(
-                        output_path = Output(
+                        output_file = Output(
                             type = AssetTypes.URI_FILE, 
                             path = output_full_path, 
                             mode = InputOutputModes.RW_MOUNT,
@@ -465,7 +482,7 @@ class BinaryClassificationBenchmark():
                     compute = compute_target,
                     environment = f"{job_env.name}:{job_env.version}",
                     code = "./aml/src/",
-                    command = "python aml_load_dataset.py --dataset ${{inputs.dataset}} --output_path ${{outputs.output_path}} --output_name ${{inputs.output_name}} --seed ${{inputs.seed}}",
+                    command = "python aml_load_dataset.py --dataset ${{inputs.dataset}} --output_file ${{outputs.output_file}} --seed ${{inputs.seed}}",
                     experiment_name = "sparse-featurizer-data-prep",
                     display_name = name,
                 )
@@ -502,7 +519,12 @@ class BinaryClassificationBenchmark():
         
         # Now run the featurization and learning jobs
         print("Creating benchmark trial runs...")
-        steps = []
+
+        # Load existing results
+        dataset_jsons = fs.glob(path=f"{relative_data_path}/results/*.json")
+        print(f"Found {len(dataset_csvs)} json file results")
+        print(dataset_jsons)
+        jobs = []
         for queue_item in self.queue:
             m = hashlib.sha256()
             m.update(json.dumps(queue_item).encode("utf-8"))
@@ -515,67 +537,90 @@ class BinaryClassificationBenchmark():
 
                 # Create the output json file
                 output_name = f"{name}.json"
-                
-                step_output_path = OutputFileDatasetConfig(
-                        name="step_output_path",
-                        destination=(datastore, f"{output_path}")
-                    )
 
                 # Check if the file already exists in the datastore already
-                try:
-                    print(os.path.join(output_path, output_name))
-                    file_dataset = Dataset.File.from_files(path=(datastore, os.path.join(output_path, output_name)))
-                    if file_dataset is not None:
-                        print(f"Skipping processing {name} because data already exists")
-                        continue
-                except:
-                    pass
+                print(f"{relative_data_path}/results/{output_name}")
+                if f"{relative_data_path}/results/{output_name}" in dataset_jsons:
+                    print(f"Skipping {name} because data already exists")
+                    continue
+                #if len(fs.glob(path=f"{relative_data_path}/results/{output_name}")) > 0:
+                #    print(f"Skipping {name} because data already exists")
+                #    continue
 
                 # Input all the csv files
                 in_csvs = []
                 for trial in range(n_trials):
                     in_csvs.append("--in_csvs")
                     in_csvs.append(f"{dataset[0]}_{seed + trial}.csv")
-                
-                # Create the input folder
-                input_folder = f"{data_path}/{dataset[0]}/"
-                input_folder = DataPath(datastore, input_folder)
-                data_path_pipeline_param = (PipelineParameter(name=f"{name}_{trial}", default_value=input_folder),
-                                            DataPathComputeBinding(mode='mount'))
-                
-                # Create the step
-                steps.append(
-                    PythonScriptStep(
-                        name=name,
-                        script_name="aml_run_trial.py",
-                        arguments=in_csvs + [
-                            "--in_folder", data_path_pipeline_param,
-                            "--out_folder", step_output_path,
-                            "--out_json_name", output_name,
-                            "--name", name,
-                            "--featurizer_class_name", queue_item['featurizer_class_name'],
-                            "--featurizer_args", str(queue_item['featurizer_args']),
-                            "--learner_class_name", queue_item['learner_class_name'],
-                            "--learner_args", str(queue_item['learner_args']),
-                            "--sample_rate", queue_item['sample_rate'],
-                            "--extra_logging", str(queue_item['extra_logging']),
-                            "--seed", seed,
-                        ],
-                        inputs=[data_path_pipeline_param],
-                        outputs=[step_output_path],
-                        compute_target=compute_target,
-                        source_directory=".",
-                        runconfig=RunConfiguration(
-                                conda_dependencies=CondaDependencies.create(
-                                    conda_packages=[], 
-                                    pip_packages=['azureml-sdk', 'numpy', 'pandas', 'scikit-learn', 'fastbloom-rs',
-                                        "git+https://github.com/glmcdona/stratified-vectorizer.git"],
-                                    pin_sdk_version=False
-                                )
-                            ),
-                    )
+
+                # Create the job
+                input_folder = f"azureml://datastores/workspaceblobstore/paths/{relative_data_path}/data/{dataset[0]}/"
+                out_json_file = f"azureml://datastores/workspaceblobstore/paths/{relative_data_path}/results/{output_name}"
+
+                job = command(
+                    inputs=dict(
+                        name = name,
+                        featurizer_class_name = queue_item["featurizer_class_name"],
+                        featurizer_args = str(queue_item["featurizer_args"]),
+                        learner_class_name = queue_item["learner_class_name"],
+                        learner_args = str(queue_item["learner_args"]),
+                        sample_rate = queue_item["sample_rate"],
+                        extra_logging = str(queue_item["extra_logging"]),
+                        seed = seed + trial,
+                        in_folder = Input(
+                            type = AssetTypes.URI_FOLDER,
+                            path = input_folder,
+                            mode = InputOutputModes.RO_MOUNT,
+                        )
+                    ),
+                    outputs = dict(
+                        out_json_file = Output(
+                            type = AssetTypes.URI_FILE, 
+                            path = out_json_file, 
+                            mode = InputOutputModes.RW_MOUNT,
+                        )
+                    ),
+                    compute = compute_target,
+                    environment = f"{job_env.name}:{job_env.version}",
+                    code = "./aml/src/",
+                    command = "python aml_run_trial.py " + " ".join(in_csvs) + 
+                        " --in_folder ${{inputs.in_folder}} --out_json_file ${{outputs.out_json_file}}" +
+                        " --name ${{inputs.name}} --featurizer_class_name ${{inputs.featurizer_class_name}} " +
+                        " --featurizer_args \"${{inputs.featurizer_args}}\" --learner_class_name ${{inputs.learner_class_name}} " +
+                        " --learner_args \"${{inputs.learner_args}}\" --sample_rate ${{inputs.sample_rate}} " +
+                        " --extra_logging \"${{inputs.extra_logging}}\" --seed ${{inputs.seed}} ",
+                    experiment_name = "sparse-featurizer-fitting",
+                    display_name = name,
                 )
+                jobs.append(ml_client.jobs.create_or_update(job))
+
+
+        if len(jobs) > 0:
+            # Wait for completion
+            print("Waiting for fitting jobs to complete...")
+            
+            while True:
+                status = {}
+                for job in jobs:
+                    job_status = ml_client.jobs.get(name=job.name).status
+                    if job_status not in status:
+                        status[job_status] = 0
+                    status[job_status] += 1
+                
+                print(status)
+
+                if all([s in ["Completed", "Failed"] for s in status.keys()]):
+                    break
+                
+                time.sleep(5)
+            
+            # Check for failures
+            if any([s == "Failed" for s in status.keys()]):
+                print("WARNING: One or more fitting jobs failed, continuing anyway")
+            
+            print("Data fitting jobs completed successfully")
         
+        """
         # Submit the steps in batches multithreaded
         def submit_batch(steps, experiment, workspace, compute_target):
             pipeline = Pipeline(workspace=workspace, steps=steps)
@@ -603,11 +648,15 @@ class BinaryClassificationBenchmark():
                 while pipeline_run.get_status() != "Finished":
                     time.sleep(20)
                 print(f"Pipeline finished: {pipeline_run.id}")
+        """
 
         # Now merge the results
         print("Merging results...")
+        
 
         # Check if the file already exists in the datastore already
+        dataset_jsons = fs.glob(path=f"{relative_data_path}/results/*.json")
+        print(f"Found {len(dataset_csvs)} json file results")
         results = []
         for queue_item in self.queue:
             m = hashlib.sha256()
@@ -620,24 +669,21 @@ class BinaryClassificationBenchmark():
                 name = f"{queue_item['name']}_{dataset[0]}_{id}"
                 output_name = f"{name}.json"
 
-                try:
-                    file_dataset = Dataset.File.from_files(path=(datastore, os.path.join(output_path, output_name)))
-                    if file_dataset is not None:
-                        # Open the file and read the results
-                        print(f"Found {name} in the datastore. Adding to results.")
-                        files = file_dataset.download()
-                        print(files)
+                #if len(fs.glob(f"{relative_data_path}/results/{output_name}")) == 0:
+                #    print(f"WARNING: Results file {output_name} not found in datastore")
+                #    continue
+                if f"{relative_data_path}/results/{output_name}" not in dataset_jsons:
+                    print(f"WARNING: Results file {output_name} not found in datastore")
+                    continue
+                print(f"Loading results found for {name}...")
 
-                        with open(files[0], 'r') as f:
-                            # Print the file contents
-                            data = {"dataset": dataset[0]}
-                            for result in json.load(f):
-                                entry = copy.deepcopy(data)
-                                entry.update(result)
-                                results.append(entry)
-                except:
-                    print(f"ERROR: Could not find {output_name} in the datastore. Skipping this result.")
-                    pass
+                with fs.open(f"{relative_data_path}/results/{output_name}", "r") as f:
+                    # Print the file contents
+                    data = {"dataset": dataset[0]}
+                    for result in json.load(f):
+                        entry = copy.deepcopy(data)
+                        entry.update(result)
+                        results.append(entry)
         
         # Aggregate the results
         group_by = ["dataset"]

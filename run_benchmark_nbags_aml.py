@@ -23,78 +23,6 @@ def run_feature_size_benchmark():
     }
 
     featurizers = {
-        "StratTfIdf_bag10000" : 
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 10000,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "tfidf-learner",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratTfIdf_bag5000" : 
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 5000,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "tfidf-learner",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratTfIdf_bag1000" : 
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 1000,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "tfidf-learner",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratTfIdf_bag100" : 
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 100,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "tfidf-learner",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratTfIdf_bag10" : 
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 10,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "tfidf-learner",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratChi_bag1000" :
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 1000,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "chi",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratChi_bag100" :
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 100,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "chi",
-                "ranking_learner_args": learner_args,
-            }),
-        "StratChi_bag10" :
-            ("BenchmarkStratifiedBagVectorizer", {
-                "n_bags": 10,
-                "error_rate": 0,
-                "delimiter": '|',
-                "task": 'classification',
-                "ranking_method": "chi",
-                "ranking_learner_args": learner_args,
-            }),
         "TfidfVectorizer" :
             ("BenchmarkTfidfVectorizer", {
                 "delimiter": '|',
@@ -108,6 +36,18 @@ def run_feature_size_benchmark():
                 "delimiter": '|',
             }),
     }
+
+    for n_bags in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 200000, 300000, 400000, 500000]:
+        featurizers[f"StratTfIdf_bag{n_bags}"] = (
+            ("BenchmarkStratifiedBagVectorizer", {
+                "n_bags": n_bags,
+                "error_rate": 0,
+                "delimiter": '|',
+                "task": 'classification',
+                "ranking_method": "tfidf-learner",
+                "ranking_learner_args": learner_args,
+            })
+        )
     
     all_results_raw = []
     all_results_aggr = []
@@ -116,16 +56,15 @@ def run_feature_size_benchmark():
     benchmark = BinaryClassificationBenchmark()
 
     # Sweep the percent of data to use
-    #for sample_rate in [0.1, 0.25, 0.5, 1.0]:
-    for sample_rate in [0.1, 0.10]:
-        n_features = [2000, 10000, 50000, 500000]
-
-        for n_features in n_features:
+    count = 0
+    for sample_rate in [0.1, 1.0]:
+        for n_features in [100000]:
             print(f"\n--- Adding benchmark for n_features={n_features} ---")
             for name, featurizer_base in featurizers.items():
                 print("Adding benchmark for %s..." % name)
                 featurizer_args = copy.deepcopy(featurizer_base[1])
                 featurizer_args["n_features"] = n_features
+                
                 benchmark.add_queue(
                     name = name,
                     featurizer_class_name = featurizer_base[0],
@@ -137,8 +76,13 @@ def run_feature_size_benchmark():
                         "featurizer" : name,
                         "n_features" : n_features,
                         "sample_rate" : sample_rate,
+                        "n_bags" : featurizer_args.get("n_bags", None),
+                        "error_rate" : featurizer_args.get("error_rate", None),
                     },
                 )
+                count += 1
+    print(f"Added {count} benchmarks.")
+    input("Press Enter to start...")
     
     # NOTE: Replace these with your own AML subscription details
     subscription_id = os.environ.get("SUBSCRIPTION_ID")
@@ -177,11 +121,11 @@ def run_feature_size_benchmark():
 
     # Convert array of dict to df
     df = pd.DataFrame(results_aggregated)
-    df.to_csv("aml_results_aggr.csv")
+    df.to_csv("aml_results_nbags_aggr.csv")
     df = pd.DataFrame(results_raw)
-    df.to_csv("aml_results_raw.csv")
+    df.to_csv("aml_results_nbags_raw.csv")
     df = pd.DataFrame(results_merged)
-    df.to_csv("aml_results_merged.csv")
+    df.to_csv("aml_results_nbags_merged.csv")
 
 
 

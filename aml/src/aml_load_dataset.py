@@ -7,8 +7,7 @@ from sparse_benchmark.benchmark import standard_datasets
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, help="Dataset to load.")
-    parser.add_argument("--output_path", type=str, help="Folder to write the data to.")
-    parser.add_argument("--output_name", type=str, help="Filename to write the data to.")
+    parser.add_argument("--output_file", type=str, help="Filename to write the data to.")
     parser.add_argument("--seed", type=int, help="Random seed to use.")
     args = parser.parse_args()
 
@@ -37,9 +36,8 @@ if __name__ == "__main__":
     df = loader(save_folder=None, seed=args.seed)
 
     # Write the data
-    full_path = os.path.join(args.output_path, args.output_name)
-    print(f"Writing data to {full_path}..")
-    df.to_csv(full_path, index=False)
+    print(f"Writing data to {args.output_file}..")
+    df.to_csv(args.output_file, index=False)
 
 
 

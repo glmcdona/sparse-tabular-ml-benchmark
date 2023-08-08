@@ -3,7 +3,6 @@ import os
 import numpy as np
 import pandas as pd
 import json
-from azureml.core import Run
 from sparse_benchmark.benchmark import BinaryClassificationBenchmark
 from sparse_benchmark.transforms import *
 from sklearn.linear_model import LogisticRegression
@@ -12,8 +11,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--in_folder", type=str, help="Input folder that contains the csv files.", required=True)
     parser.add_argument("--in_csvs", action="append", help="Filenames to read the data from.", required=True)
-    parser.add_argument("--out_folder", type=str, help="Folder to write the data to.")
-    parser.add_argument("--out_json_name", type=str, help="Filename to write the data to in json format.")
+    parser.add_argument("--out_json_file", type=str, help="Json file to write the data to.")
     parser.add_argument("--name", type=str, help="Name of group of trials.")
     parser.add_argument("--featurizer_class_name", type=str, help="Name of the featurizer class.")
     parser.add_argument("--featurizer_args", type=str, help="Arguments for the featurizer.")
@@ -26,9 +24,6 @@ if __name__ == "__main__":
 
     # Print arguments
     print(f"Arguments: {args}")
-
-    # Get the Azure ML run
-    run = Run.get_context()
 
     results = []
     for n, in_csv in enumerate(args.in_csvs):
@@ -74,8 +69,7 @@ if __name__ == "__main__":
     print(results)
 
     # Save the results
-    full_path = os.path.join(args.out_folder, args.out_json_name)
-    print(f"Saving results to {full_path}..")
-    with open(full_path, "w") as f:
+    print(f"Saving results to {args.out_json_file}..")
+    with open(args.out_json_file, "w") as f:
         json.dump(results, f)
     
