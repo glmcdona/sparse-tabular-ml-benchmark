@@ -6,6 +6,7 @@ import json
 from sparse_benchmark.benchmark import BinaryClassificationBenchmark
 from sparse_benchmark.transforms import *
 from sklearn.linear_model import LogisticRegression
+from lightgbm import LGBMClassifier
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -39,6 +40,9 @@ if __name__ == "__main__":
         # LR
         if args.learner_class_name == "LogisticRegression":
             learner = LogisticRegression(**learner_args)
+        # LGBM
+        elif args.learner_class_name == "LGBMClassifier":
+            learner = LGBMClassifier(**learner_args)
         else:
             raise Exception(f"Learner {args.learner_class_name} not found")
 
