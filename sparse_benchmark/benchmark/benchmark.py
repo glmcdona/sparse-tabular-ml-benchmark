@@ -549,7 +549,7 @@ class BinaryClassificationBenchmark():
                     environment = f"{job_env.name}:{job_env.version}",
                     code = "./aml/src/",
                     command = "python aml_load_dataset.py --dataset ${{inputs.dataset}} --output_file ${{outputs.output_file}} --seed ${{inputs.seed}}",
-                    experiment_name = "sparse-featurizer-data-prep",
+                    experiment_name = f"sparse-featurizer-data-prep",
                     display_name = name,
                 )
 
@@ -686,35 +686,6 @@ class BinaryClassificationBenchmark():
             
             print("Data fitting jobs completed successfully")
         
-        """
-        # Submit the steps in batches multithreaded
-        def submit_batch(steps, experiment, workspace, compute_target):
-            pipeline = Pipeline(workspace=workspace, steps=steps)
-            pipeline_run = experiment.submit(pipeline, continue_on_step_failure=True)
-            print(f"Pipeline submitted for execution: {pipeline_run.id}")
-            while pipeline_run.get_status() != "Finished":
-                time.sleep(20)
-            print(f"Pipeline finished: {pipeline_run.id}")
-
-        threads = []
-        print(f"Submitting {len(steps)} steps total...")
-        if len(steps) > 0:
-            n_batches = 5
-            batch_size = math.ceil(len(steps) / n_batches)
-            pipelines = []
-            for i in range(0, len(steps), batch_size):
-                print(f"Submitting batch {i} to {i+batch_size}...")
-                pipeline = Pipeline(workspace=workspace, steps=steps)
-                pipeline_run = experiment.submit(pipeline, continue_on_step_failure=True)
-                pipelines.append(pipeline_run)
-                print(f"Pipeline submitted for execution: {pipeline_run.id}")
-        
-            print("\nWaiting for pipelines to finish...")
-            for pipeline_run in pipelines:
-                while pipeline_run.get_status() != "Finished":
-                    time.sleep(20)
-                print(f"Pipeline finished: {pipeline_run.id}")
-        """
 
         # Now merge the results
         print("Merging results...")
