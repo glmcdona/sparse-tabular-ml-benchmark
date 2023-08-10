@@ -103,6 +103,18 @@ class BinaryClassificationBenchmark():
             "test_precision": [],
             "test_recall": [],
 
+            "valid_roc_auc": [],
+            "valid_f1": [],
+            "valid_accuracy": [],
+            "valid_precision": [],
+            "valid_recall": [],
+
+            "test_and_valid_roc_auc": [],
+            "test_and_valid_f1": [],
+            "test_and_valid_accuracy": [],
+            "test_and_valid_precision": [],
+            "test_and_valid_recall": [],
+
             "train_roc_auc": [],
             "train_f1": [],
             "train_accuracy": [],
@@ -114,6 +126,8 @@ class BinaryClassificationBenchmark():
             "train_shape_after_transform": [],
             "test_shape_before_transform": [],
             "test_shape_after_transform": [],
+            "valid_shape_before_transform": [],
+            "valid_shape_after_transform": [],
             "size_in_bytes_featurizer": [],
             "size_in_bytes_learner": [],
             "size_in_bytes_total": [],
@@ -132,6 +146,9 @@ class BinaryClassificationBenchmark():
             "time_test_total": [],
             "time_test_transform": [],
             "time_test_score": [],
+            "time_valid_total": [],
+            "time_valid_transform": [],
+            "time_valid_score": [],
         })
 
         # Compute dataset properties
@@ -141,8 +158,12 @@ class BinaryClassificationBenchmark():
         for k, v in dataset_properties.items():
             results[k].append(v)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            df["features"], df["target"], test_size=0.2, random_state=seed)
+        # Split into train, test, and validation
+        # 70% train, 15% test, 15% validation
+        X_train, X_hold, y_train, y_hold = train_test_split(
+            df["features"], df["target"], test_size=0.3, random_state=seed)
+        X_test, X_val, y_test, y_val = train_test_split(
+            X_hold, y_hold, test_size=0.5, random_state=seed)
 
         # Sample
         if sample_rate < 1.0:
@@ -153,6 +174,10 @@ class BinaryClassificationBenchmark():
             n_samples = int(len(X_test) * sample_rate)
             X_test = X_test[:n_samples]
             y_test = y_test[:n_samples]
+
+            n_samples = int(len(X_val) * sample_rate)
+            X_val = X_val[:n_samples]
+            y_val = y_val[:n_samples]
         
         # Transform fit
         start = time.perf_counter_ns()
@@ -186,26 +211,64 @@ class BinaryClassificationBenchmark():
         results["train_precision"].append(precision_score(y_train, y_pred))
         results["train_recall"].append(recall_score(y_train, y_pred))
 
-        # Transform test data
+        # Transform test and validation data
         results["test_shape_before_transform"].append(X_test.shape)
         start = time.perf_counter_ns()
         X_test = featurizer.transform(X_test)
         results["time_test_transform"].append(time.perf_counter_ns() - start)
         results["test_shape_after_transform"].append(X_test.shape)
 
+        results["valid_shape_before_transform"].append(X_val.shape)
+        start = time.perf_counter_ns()
+        X_val = featurizer.transform(X_val)
+        results["time_valid_transform"].append(time.perf_counter_ns() - start)
+        results["valid_shape_after_transform"].append(X_val.shape)
+
         # Scale the data
         X_test = scaler.transform(X_test)
+        X_val = scaler.transform(X_val)
 
-        # Score and compute the test metrics
+        # Score and compute the test and validation metrics
         start = time.perf_counter_ns()
-        y_pred = learner.predict(X_test)
+        y_pred_test = learner.predict(X_test)
         results["time_test_score"].append(time.perf_counter_ns() - start)
+
+        start = time.perf_counter_ns()
+        y_pred_val = learner.predict(X_val)
+        results["time_valid_score"].append(time.perf_counter_ns() - start)
         
-        results["test_roc_auc"].append(roc_auc_score(y_test, y_pred))
-        results["test_f1"].append(f1_score(y_test, y_pred))
-        results["test_accuracy"].append(accuracy_score(y_test, y_pred))
-        results["test_precision"].append(precision_score(y_test, y_pred))
-        results["test_recall"].append(recall_score(y_test, y_pred))
+        results["test_roc_auc"].append(roc_auc_score(y_test, y_pred_test))
+        results["test_f1"].append(f1_score(y_test, y_pred_test))
+        results["test_accuracy"].append(accuracy_score(y_test, y_pred_test))
+        results["test_precision"].append(precision_score(y_test, y_pred_test))
+        results["test_recall"].append(recall_score(y_test, y_pred_test))
+
+        results["valid_roc_auc"].append(roc_auc_score(y_val, y_pred_val))
+        results["valid_f1"].append(f1_score(y_val, y_pred_val))
+        results["valid_accuracy"].append(accuracy_score(y_val, y_pred_val))
+        results["valid_precision"].append(precision_score(y_val, y_pred_val))
+        results["valid_recall"].append(recall_score(y_val, y_pred_val))
+
+        results["test_and_valid_roc_auc"].append(roc_auc_score(
+            np.concatenate([y_test, y_val]),
+            np.concatenate([y_pred_test, y_pred_val]))
+        )
+        results["test_and_valid_f1"].append(f1_score(
+            np.concatenate([y_test, y_val]),
+            np.concatenate([y_pred_test, y_pred_val]))
+        )
+        results["test_and_valid_accuracy"].append(accuracy_score(
+            np.concatenate([y_test, y_val]),
+            np.concatenate([y_pred_test, y_pred_val]))
+        )
+        results["test_and_valid_precision"].append(precision_score(
+            np.concatenate([y_test, y_val]),
+            np.concatenate([y_pred_test, y_pred_val]))
+        )
+        results["test_and_valid_recall"].append(recall_score(
+            np.concatenate([y_test, y_val]),
+            np.concatenate([y_pred_test, y_pred_val]))
+        )
 
         # Compute total times
         results["time_train_total"].append(
@@ -215,6 +278,9 @@ class BinaryClassificationBenchmark():
         results["time_test_total"].append(
             results["time_test_transform"][-1] +
             results["time_test_score"][-1])
+        results["time_valid_total"].append(
+            results["time_valid_transform"][-1] +
+            results["time_valid_score"][-1])
         results["time_total"].append(
             results["time_train_total"][-1] +
             results["time_test_total"][-1])
